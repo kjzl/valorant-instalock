@@ -1,0 +1,50 @@
+[package]
+name = "valorant-instalock"
+version = "1.0.0-rc.2"
+edition = "2021"
+resolver = "2"
+authors = ["kjzl"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.81"
+base64 = "0.22.0"
+chrono = { version = "0.4.37", features = ["serde", "unstable-locales"] }
+console = { version = "0.15.8", features = ["windows-console-colors"] }
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+dialoguer = { version = "0.11.0", features = ["fuzzy-select", "history"] }
+directories = "5.0.1"
+env_logger = "0.11.3"
+futures = "0.3.30"
+futures-util = "0.3.30"
+http = "1.1.0"
+indicatif = { version = "0.17.8", features = [
+	"tokio",
+	"futures",
+	"improved_unicode",
+] }
+log = "0.4.21"
+native-tls = "0.2.11"
+# By default crossbeam-channel is used internally by notify. Which also allows the Watcher to be sync. This can cause issues when used inside tokio.
+# You can disable crossbeam-channel, letting notify fallback to std channels via disabling the default features.
+notify = { version = "6.1.1", default-features = false, features = [
+	"macos_fsevent",
+] }
+open = "5.1.2"
+pin-project = "1.1.5"
+pin-project-lite = "0.2.14"
+rand = "0.8.5"
+reqwest = { version = "0.12.2", features = ["json", "gzip"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.115"
+serde_repr = "0.1.18"
+strum = { version = "0.26.2", features = ["derive"] }
+sys-locale = "0.3.1"
+thiserror = "1.0.58"
+tokio = { version = "1.36.0", features = ["full"] }
+tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
+
+[build-dependencies]
+built = { version = "0.7.1" }
+winres = "0.1"
