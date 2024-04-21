@@ -1888,7 +1888,7 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "valorant-instalock"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "anyhow",
  "base64 0.22.0",
@@ -1907,9 +1907,11 @@ dependencies = [
  "native-tls",
  "notify",
  "open",
+ "parking_lot",
  "pin-project",
  "pin-project-lite",
  "rand",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
