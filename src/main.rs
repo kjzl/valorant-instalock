@@ -26,7 +26,7 @@ use crate::global::API_VERSION;
 use crate::global::GAME_AGENTS;
 use crate::global::GAME_MAPS;
 use crate::lockfile::watch_lockfile;
-use crate::valorant_client::ValorantClient;
+use crate::valorant_client::ValorantClientHandle;
 
 mod config;
 mod global;
@@ -161,7 +161,7 @@ async fn main() -> Result<(), anyhow::Error> {
     progress.println(format!("{}", API_VERSION.get().unwrap()));
     progress.finish();
     let mut lockfile_watcher = watch_lockfile().await?;
-    let valorant_client: Arc<Mutex<Option<ValorantClient>>> =
+    let valorant_client: Arc<Mutex<Option<ValorantClientHandle>>> =
         Arc::new(Mutex::new(None));
     let menu_valorant_client = Arc::clone(&valorant_client);
     // TODO: FIXME when opening program when game already running, check if player is in pregame already!!!!!
@@ -280,7 +280,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 log::info!("Lockfile created/modified: {lockfile:?}",);
                 log::info!("Starting ValorantClient");
                 *valorant_client.lock().unwrap() = Some(
-                    match ValorantClient::start(
+                    match ValorantClientHandle::start(
                         lockfile,
                         CONFIG.get().unwrap().clone(),
                     )

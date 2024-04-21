@@ -238,21 +238,21 @@ pub struct ValorantApiMap {
 #[serde(rename_all = "camelCase")]
 pub struct ValorantApiVersion {
     // 4223B9537F74423A
-    manifest_id: String,
+    pub manifest_id: String,
     // release-08.05
-    branch: String,
+    pub branch: String,
     // 08.05.00.2367061
-    version: String,
+    pub version: String,
     // 9
-    build_version: String,
+    pub build_version: String,
     // 4.27.2.0
-    engine_version: String,
+    pub engine_version: String,
     // release-08.05-shipping-9-2367061
-    riot_client_version: String,
+    pub riot_client_version: String,
     // 82.0.3.1237.2870
-    riot_client_build: String,
+    pub riot_client_build: String,
     // 2024-03-15T00:00:00Z
-    build_date: chrono::DateTime<chrono::Local>,
+    pub build_date: chrono::DateTime<chrono::Local>,
 }
 
 impl Default for ValorantApiVersion {

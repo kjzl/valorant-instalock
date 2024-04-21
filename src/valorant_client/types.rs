@@ -90,7 +90,7 @@ pub struct ValorantClientAuth {
     pub token: String,
     // entitlements: Vec<String>,
     // issuer: Url,
-    // subject: Uuid,
+    pub subject: String,
 }
 
 /*
