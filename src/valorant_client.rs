@@ -6,7 +6,6 @@ use std::ops::Deref;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_tungstenite::tungstenite::client;
 
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::{channel, Sender};
@@ -43,6 +42,45 @@ pub struct ValorantClientHandle {
 pub struct ShardRegion {
     shard: String,
     region: String,
+}
+
+pub enum MaybeValorantClient {
+    Client(ValorantClient),
+    Parts(Lockfile, Config),
+}
+
+impl MaybeValorantClient {
+    pub async fn init(lockfile: Lockfile, config: Config) -> Self {
+        match ValorantClient::init(lockfile.clone(), config.clone()).await {
+            Ok(client) => Self::Client(client),
+            Err(err) => {
+                log::error!("Failed to initialize client, trying to init another time later: {}", err);
+                Self::Parts(lockfile, config)
+            }
+        }
+    }
+
+    pub async fn retry_init(&mut self) {
+        let parts = match self {
+            Self::Parts(lockfile, config) => (lockfile, config),
+            _ => return,
+        };
+        match ValorantClient::init(parts.0.clone(), parts.1.clone()).await {
+            Ok(client) => {
+                *self = Self::Client(client);
+            }
+            Err(err) => {
+                log::error!("Failed to initialize client: {}", err);
+            }
+        }
+    }
+
+    pub fn client(&self) -> Option<ValorantClient> {
+        match self {
+            Self::Client(client) => Some(client.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -244,15 +282,24 @@ impl ValorantClient {
 impl ValorantClientHandle {
     fn spawn_cmd_handler(
         mut cmd_rx: Receiver<ValorantCommand>,
-        client_state: ValorantClient,
+        client_state: Arc<Mutex<MaybeValorantClient>>,
     ) {
         tokio::task::spawn(async move {
+            let mut client = None;
             loop {
+                if client.is_none() {
+                    client_state.lock().retry_init().await;
+                    let Some(unwrapped) = client_state.lock().client() else {
+                        continue;
+                    };
+                    client = Some(unwrapped);
+                }
+                let client = client.as_ref().unwrap();
                 let Some(cmd) = cmd_rx.recv().await else {
                     log::info!(
                         "Command channel was closed. Shutting down Client."
                     );
-                    client_state
+                    client
                         .running
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     break;
@@ -260,13 +307,7 @@ impl ValorantClientHandle {
                 match cmd {
                     ValorantCommand::QuitPregame => {
                         log::info!("Quitting pregame");
-                        let Some(current_match_id) =
-                            client_state.current_match_id().clone()
-                        else {
-                            log::error!("No current match id available. Cannot quit pregame.");
-                            continue;
-                        };
-                        match client_state.quit_pregame().await {
+                        match client.quit_pregame().await {
                             Ok(_) => log::info!("Pregame quit successfully"),
                             Err(err) => {
                                 log::error!("Failed to quit pregame: {}", err)
@@ -275,13 +316,7 @@ impl ValorantClientHandle {
                     }
                     ValorantCommand::QuitGame => {
                         log::info!("Quitting game");
-                        let Some(current_match_id) =
-                            client_state.current_match_id().clone()
-                        else {
-                            log::error!("No current match id available. Cannot quit pregame.");
-                            continue;
-                        };
-                        match client_state.quit_ingame().await {
+                        match client.quit_ingame().await {
                             Ok(_) => log::info!("Game quit successfully"),
                             Err(err) => {
                                 log::error!("Failed to quit game: {}", err)
@@ -345,7 +380,7 @@ impl ValorantClientHandle {
     }
 
     fn spawn_event_handler(
-        client_state: ValorantClient,
+        mut client_state: Arc<Mutex<MaybeValorantClient>>,
         mut stream: ValorantEventStream,
     ) {
         tokio::task::spawn(async move {
@@ -355,61 +390,68 @@ impl ValorantClientHandle {
             //);
             //Self::handle_pregame(false, &config, &client_state, &http_client)
             //    .await;
+            let mut client = None;
             loop {
-                if !client_state
-                    .running
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    log::info!("Client was dropped. Shutting down.");
-                    break;
-                }
                 let Some(event) = stream.next().await else {
                     log::info!("Event stream ended. Shutting down Client.");
                     break;
                 };
+                if client.is_none() {
+                    client_state.lock().retry_init().await;
+                    let Some(unwrapped) = client_state.lock().client() else {
+                        continue;
+                    };
+                    client = Some(unwrapped);
+                }
+                let client = client.as_ref().unwrap();
+                if !client.running.load(std::sync::atomic::Ordering::Relaxed) {
+                    log::info!("Client was dropped. Shutting down.");
+                    break;
+                }
+
                 match event {
                     ValorantEvent::EntitlementsTokenChanged(auth) => {
-                        *client_state.auth() = auth;
+                        *client.auth() = auth;
                     }
                     ValorantEvent::ClientInfo(ClientStatus {
                         subject,
                         loop_state: GameLoopState::Pregame,
                         maybe_match_id: match_id,
                     }) => {
-                        if client_state.loop_state() == GameLoopState::Pregame {
+                        if client.loop_state() == GameLoopState::Pregame {
                             continue;
                         }
-                        client_state.set_loop_state(GameLoopState::Pregame);
-                        *client_state.current_match_id() = Some(match_id);
-                        let _ = client_state.handle_pregame(true).await;
+                        client.set_loop_state(GameLoopState::Pregame);
+                        *client.current_match_id() = Some(match_id);
+                        let _ = client.handle_pregame(true).await;
                     }
                     ValorantEvent::ClientInfo(ClientStatus {
                         subject,
                         loop_state: GameLoopState::Ingame,
                         maybe_match_id: match_id,
                     }) => {
-                        if client_state.loop_state() == GameLoopState::Ingame {
+                        if client.loop_state() == GameLoopState::Ingame {
                             continue;
                         }
                         let now = chrono::Local::now();
                         eprintln!("{} - Match started", now.format("%H:%M:%S"));
                         log::info!("Match started: {match_id}");
-                        client_state.set_loop_state(GameLoopState::Ingame);
-                        *client_state.current_match_id() = Some(match_id);
+                        client.set_loop_state(GameLoopState::Ingame);
+                        *client.current_match_id() = Some(match_id);
                     }
                     ValorantEvent::ClientInfo(ClientStatus {
                         subject,
                         loop_state: GameLoopState::Menus,
                         ..
                     }) => {
-                        if client_state.loop_state() == GameLoopState::Menus {
+                        if client.loop_state() == GameLoopState::Menus {
                             continue;
                         }
                         let now = chrono::Local::now();
                         eprintln!("{} - Match ended", now.format("%H:%M:%S"));
                         log::info!("Pregame/Match ended");
-                        client_state.set_loop_state(GameLoopState::Menus);
-                        *client_state.current_match_id() = None;
+                        client.set_loop_state(GameLoopState::Menus);
+                        *client.current_match_id() = None;
                     }
                 }
             }
@@ -422,8 +464,10 @@ impl ValorantClientHandle {
     ) -> anyhow::Result<Self> {
         let stream = ValorantEventStream::connect(&lockfile).await?;
         let (cmd_tx, cmd_rx) = channel(100);
-        let client_state = ValorantClient::init(lockfile, config).await?;
-        Self::spawn_cmd_handler(cmd_rx, client_state.clone());
+        let client_state = Arc::new(Mutex::new(
+            MaybeValorantClient::init(lockfile, config).await,
+        ));
+        Self::spawn_cmd_handler(cmd_rx, Arc::clone(&client_state));
         Self::spawn_event_handler(client_state, stream);
         Ok(Self { tx: cmd_tx })
     }
